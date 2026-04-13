@@ -22,6 +22,10 @@ namespace EcommerceAPI.Models
         public decimal Total { get; set; }
         public string PaymentMode { get; set; }
         public string Date { get; set; }
+        public string PaymentStatus { get; internal set; }
+        public string RazorpayOrderId { get; set; }
+        public string RazorpayPaymentId { get; set; }
+        public string RazorpaySignature { get; set; }
     }
 
     public class OrderItem

@@ -180,15 +180,20 @@ namespace EcommerceService.Repository.Service
                     {
                         try
                         {
-                            // Insert Order
                             string insertOrderQuery = @"
-                                INSERT INTO Orders 
-                                    (OrderNumber, CustomerName, Email, Phone, Address, City,
-                                     Pincode, TotalAmount, PaymentMode, PaymentStatus, OrderStatus, CreatedDate)
-                                OUTPUT INSERTED.OrderId
-                                VALUES 
-                                    (@OrderNumber, @CustomerName, @Email, @Phone, @Address, @City,
-                                     @Pincode, @TotalAmount, @PaymentMode, @PaymentStatus, 'Pending', GETDATE())";
+                        INSERT INTO Orders 
+                            (OrderNumber, CustomerName, Email, Phone, Address, City,
+                             Pincode, TotalAmount, PaymentMode, PaymentStatus, OrderStatus,
+                             RazorpayOrderId, RazorpayPaymentId, RazorpaySignature,
+                             PaymentVerified, PaymentCompletedAt, CreatedDate)
+                        OUTPUT INSERTED.OrderId
+                        VALUES 
+                            (@OrderNumber, @CustomerName, @Email, @Phone, @Address, @City,
+                             @Pincode, @TotalAmount, @PaymentMode, @PaymentStatus, @OrderStatus,
+                             @RazorpayOrderId, @RazorpayPaymentId, @RazorpaySignature,
+                             @PaymentVerified, @PaymentCompletedAt, GETDATE())";
+
+                            bool isRazorpay = order.PaymentMode?.ToLower() == "razorpay";
 
                             SqlCommand orderCmd = new SqlCommand(insertOrderQuery, conn, transaction);
                             orderCmd.Parameters.AddWithValue("@OrderNumber", order.OrderNumber ?? "ORD-" + Guid.NewGuid().ToString("N").Substring(0, 8));
@@ -200,24 +205,32 @@ namespace EcommerceService.Repository.Service
                             orderCmd.Parameters.AddWithValue("@Pincode", order.Pincode ?? (object)DBNull.Value);
                             orderCmd.Parameters.AddWithValue("@TotalAmount", order.Total);
                             orderCmd.Parameters.AddWithValue("@PaymentMode", order.PaymentMode ?? "COD");
-                            orderCmd.Parameters.AddWithValue("@PaymentStatus", order.PaymentMode == "razorpay" ? "Pending" : "COD");
+                            orderCmd.Parameters.AddWithValue("@PaymentStatus", isRazorpay ? "Paid" : "Pending");
+                            orderCmd.Parameters.AddWithValue("@OrderStatus", isRazorpay ? "Confirmed" : "Pending");
+                            orderCmd.Parameters.AddWithValue("@RazorpayOrderId", order.RazorpayOrderId ?? (object)DBNull.Value);
+                            orderCmd.Parameters.AddWithValue("@RazorpayPaymentId", order.RazorpayPaymentId ?? (object)DBNull.Value);
+                            orderCmd.Parameters.AddWithValue("@RazorpaySignature", order.RazorpaySignature ?? (object)DBNull.Value);
+                            orderCmd.Parameters.AddWithValue("@PaymentVerified", isRazorpay ? 1 : 0);
+                            orderCmd.Parameters.AddWithValue("@PaymentCompletedAt", isRazorpay ? DateTime.Now : (object)DBNull.Value);
 
-                            int orderId = Convert.ToInt32(orderCmd.ExecuteScalar());
+                            var scalar = orderCmd.ExecuteScalar();
+                            order.DbOrderId = (scalar != null && scalar != DBNull.Value)
+                                              ? Convert.ToInt32(scalar) : 0;
 
-                            // Store orderId back so caller can use it
-                            order.DbOrderId = orderId;
+                            if (order.DbOrderId == 0)
+                                throw new Exception("Order insert failed — no OrderId returned.");
 
                             // Insert Order Items
                             foreach (var item in order.Items)
                             {
                                 string insertItemQuery = @"
-                                    INSERT INTO OrderItems 
-                                        (OrderId, ProductId, ProductName, Color, Size, HeelHeight, Quantity, Price)
-                                    VALUES 
-                                        (@OrderId, @ProductId, @ProductName, @Color, @Size, @HeelHeight, @Quantity, @Price)";
+                            INSERT INTO OrderItems 
+                                (OrderId, ProductId, ProductName, Color, Size, HeelHeight, Quantity, Price)
+                            VALUES 
+                                (@OrderId, @ProductId, @ProductName, @Color, @Size, @HeelHeight, @Quantity, @Price)";
 
                                 SqlCommand itemCmd = new SqlCommand(insertItemQuery, conn, transaction);
-                                itemCmd.Parameters.AddWithValue("@OrderId", orderId);
+                                itemCmd.Parameters.AddWithValue("@OrderId", order.DbOrderId);
                                 itemCmd.Parameters.AddWithValue("@ProductId", item.Id);
                                 itemCmd.Parameters.AddWithValue("@ProductName", item.Name ?? (object)DBNull.Value);
                                 itemCmd.Parameters.AddWithValue("@Color", item.Color ?? (object)DBNull.Value);
@@ -241,7 +254,7 @@ namespace EcommerceService.Repository.Service
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error placing order: " + ex.Message);
+                Console.WriteLine("PlaceOrder error: " + ex.Message);
                 return false;
             }
         }

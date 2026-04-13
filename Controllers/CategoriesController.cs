@@ -42,11 +42,16 @@ namespace EcommerceService.Controllers
 
         // POST api/Categories/placeOrder
         // Now returns orderId + orderNumber so Razorpay flow can use them
+        // POST api/Categories/placeOrder  — COD ONLY now
         [HttpPost("placeOrder")]
         public IActionResult PlaceOrder([FromBody] OrderRequest order)
         {
             if (order == null || order.Items == null || !order.Items.Any())
                 return BadRequest(new { success = false, message = "Order data is required." });
+
+            // Only allow COD through this endpoint
+            if (order.PaymentMode != null && order.PaymentMode.ToLower() == "razorpay")
+                return BadRequest(new { success = false, message = "Use /api/Razorpay/VerifyAndPlaceOrder for online payments." });
 
             var result = _categoryRepository.PlaceOrder(order);
 
@@ -55,8 +60,8 @@ namespace EcommerceService.Controllers
                 {
                     success = true,
                     message = "Order placed successfully.",
-                    orderId = order.DbOrderId,        // DB-generated OrderId
-                    orderNumber = order.OrderNumber       // for display to user
+                    orderId = order.DbOrderId,
+                    orderNumber = order.OrderNumber
                 });
             else
                 return StatusCode(500, new { success = false, message = "Failed to place order." });

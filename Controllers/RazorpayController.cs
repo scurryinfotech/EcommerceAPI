@@ -25,53 +25,29 @@ namespace EcommerceService.Controllers
         // POST api/Razorpay/CreateOrder
         // Creates a Razorpay order and logs the payment attempt in DB
         // ─────────────────────────────────────────────────────────────
+        // POST api/Razorpay/CreateOrder
         [HttpPost("CreateOrder")]
         public IActionResult CreateOrder([FromBody] CreateOrderRequest req)
         {
             try
             {
-                if (req == null)
-                    return BadRequest(new { message = "Request body is required." });
-
-                if (string.IsNullOrWhiteSpace(req.OrderNumber))
-                    return BadRequest(new { message = "OrderNumber is required." });
-
-                // Ensure we have a valid DB OrderId. If frontend passed 0, try to resolve by OrderNumber.
-                if (req.OrderId <= 0)
-                {
-                    int resolved = _categoryRepository.GetOrderIdByOrderNumber(req.OrderNumber);
-                    if (resolved <= 0)
-                        return BadRequest(new { message = "A valid DB OrderId is required. Ensure PlaceOrder ran before CreateOrder." });
-
-                    req.OrderId = resolved;
-                }
-
                 string keyId = _config["Razorpay:KeyId"];
                 string keySecret = _config["Razorpay:KeySecret"];
 
-                if (string.IsNullOrWhiteSpace(keyId) || string.IsNullOrWhiteSpace(keySecret))
-                    return StatusCode(500, new { message = "Razorpay credentials are not configured on the server." });
-
-                // Create order on Razorpay
                 RazorpayClient client = new RazorpayClient(keyId, keySecret);
+
                 Dictionary<string, object> options = new Dictionary<string, object>
-                {
-                    { "amount",          (int)(req.Amount * 100) }, // paise
-                    { "currency",        "INR" },
-                    { "receipt",         req.OrderNumber },
-                    { "payment_capture", 1 }
-                };
+        {
+            { "amount",          (int)(req.Amount * 100) }, // paise
+            { "currency",        "INR" },
+            { "receipt",         req.OrderNumber },         // temp receipt ref
+            { "payment_capture", 1 }
+        };
+
                 Order rzpOrder = client.Order.Create(options);
                 string razorpayOrderId = rzpOrder["id"].ToString();
 
-                // Log payment attempt in DB
-                string ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-                string userAgent = Request.Headers["User-Agent"].ToString();
-
-                _categoryRepository.InsertPaymentTransaction(
-                    req.OrderId, req.OrderNumber, razorpayOrderId,
-                    req.Amount, ip, userAgent);
-
+                // ✅ No DB insert here — just return razorpay order details to JS
                 return Ok(new
                 {
                     razorpayOrderId,
@@ -79,6 +55,91 @@ namespace EcommerceService.Controllers
                     currency = "INR",
                     keyId
                 });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = ex.Message });
+            }
+        }
+
+
+        [HttpPost("VerifyAndPlaceOrder")]
+        public IActionResult VerifyAndPlaceOrder([FromBody] VerifyAndPlaceOrderRequest req)
+        {
+            try
+            {
+                string keySecret = _config["Razorpay:KeySecret"];
+
+                // Step 1: Verify HMAC signature
+                string payload = req.RazorpayOrderId + "|" + req.RazorpayPaymentId;
+                using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(keySecret));
+                var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
+                string calcSig = BitConverter.ToString(hash).Replace("-", "").ToLower();
+
+                if (calcSig != req.RazorpaySignature)
+                    return BadRequest(new { success = false, message = "Payment verification failed." });
+
+                // Step 2: Signature verified — now save order to DB
+                req.Order.PaymentMode = "razorpay";
+                req.Order.PaymentStatus = "Paid";
+
+                var result = _categoryRepository.PlaceOrder(req.Order);
+
+                if (!result || req.Order.DbOrderId == 0)
+                    return StatusCode(500, new { success = false, message = "Payment verified but order could not be saved. Contact support." });
+
+                // Step 3: Log payment transaction against real OrderId
+                string ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+                string userAgent = Request.Headers["User-Agent"].ToString();
+
+                _categoryRepository.InsertPaymentTransaction(
+                    req.Order.DbOrderId,
+                    req.Order.OrderNumber,
+                    req.RazorpayOrderId,
+                    req.Order.Total,
+                    ip,
+                    userAgent);
+
+                // Step 4: Mark payment as success in DB
+                string paymentMethod = null;
+                try
+                {
+                    RazorpayClient client = new RazorpayClient(_config["Razorpay:KeyId"], keySecret);
+                    Payment payment = client.Payment.Fetch(req.RazorpayPaymentId);
+                    paymentMethod = payment["method"]?.ToString();
+                }
+                catch { /* non-critical */ }
+
+                _categoryRepository.UpdatePaymentSuccess(
+                    req.RazorpayOrderId,
+                    req.RazorpayPaymentId,
+                    req.RazorpaySignature,
+                    paymentMethod,
+                    JsonSerializer.Serialize(req));
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Payment successful and order placed.",
+                    orderId = req.Order.DbOrderId,
+                    orderNumber = req.Order.OrderNumber
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = ex.Message });
+            }
+        }
+
+        // POST api/Razorpay/PaymentFailed  (unchanged)
+        [HttpPost("PaymentFailed")]
+        public IActionResult PaymentFailed([FromBody] PaymentFailedRequest req)
+        {
+            try
+            {
+                // ✅ No order in DB to update — just log the failure attempt
+                Console.WriteLine($"Payment failed: {req.FailureReason} | RzpOrder: {req.RazorpayOrderId}");
+                return Ok(new { success = true });
             }
             catch (Exception ex)
             {
@@ -96,66 +157,24 @@ namespace EcommerceService.Controllers
             try
             {
                 string keySecret = _config["Razorpay:KeySecret"];
-
-                // HMAC-SHA256 signature check
                 string payload = req.RazorpayOrderId + "|" + req.RazorpayPaymentId;
+
                 using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(keySecret));
                 var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
                 string calcSig = BitConverter.ToString(hash).Replace("-", "").ToLower();
 
                 if (calcSig == req.RazorpaySignature)
-                {
-                    // Try to get payment method from Razorpay (non-critical)
-                    string paymentMethod = null;
-                    try
-                    {
-                        RazorpayClient client = new RazorpayClient(_config["Razorpay:KeyId"], keySecret);
-                        Payment payment = client.Payment.Fetch(req.RazorpayPaymentId);
-                        paymentMethod = payment["method"]?.ToString();
-                    }
-                    catch { /* non-critical, ignore */ }
-
-                    _categoryRepository.UpdatePaymentSuccess(
-                        req.RazorpayOrderId, req.RazorpayPaymentId,
-                        req.RazorpaySignature, paymentMethod,
-                        JsonSerializer.Serialize(req));
-
-                    return Ok(new { success = true, message = "Payment verified successfully." });
-                }
+                    return Ok(new { success = true });
                 else
-                {
-                    _categoryRepository.UpdatePaymentFailed(
-                        req.RazorpayOrderId, req.RazorpayPaymentId,
-                        "Signature mismatch", "SIGNATURE_MISMATCH",
-                        JsonSerializer.Serialize(req));
-
-                    return BadRequest(new { success = false, message = "Payment verification failed." });
-                }
+                    return BadRequest(new { success = false, message = "Signature mismatch." });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = ex.Message });
+                return StatusCode(500, new { success = false, message = ex.Message });
             }
         }
 
 
-        [HttpPost("PaymentFailed")]
-        public IActionResult PaymentFailed([FromBody] PaymentFailedRequest req)
-        {
-            try
-            {
-                _categoryRepository.UpdatePaymentFailed(
-                    req.RazorpayOrderId, req.RazorpayPaymentId,
-                    req.FailureReason, req.FailureCode,
-                    JsonSerializer.Serialize(req));
-
-                return Ok(new { success = true });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = ex.Message });
-            }
-        }
 
 
         // ─────────────────────────────────────────────────────────────
