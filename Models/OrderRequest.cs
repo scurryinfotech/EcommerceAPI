@@ -4,6 +4,10 @@ namespace EcommerceAPI.Models
 {
     public class OrderRequest
     {
+        public int DbOrderId { get; set; }
+
+        public string OrderNumber { get; set; }
+
         public string OrderId { get; set; }
         public string Name { get; set; }
         public string Email { get; set; }
@@ -13,7 +17,7 @@ namespace EcommerceAPI.Models
         public string Pincode { get; set; }
 
         [JsonPropertyName("OrderItems")]
-        public List<OrderItem> Items { get; set; }  // ✅ only this, no duplicate
+        public List<OrderItem> Items { get; set; } 
 
         public decimal Total { get; set; }
         public string PaymentMode { get; set; }

@@ -18,15 +18,35 @@ namespace EcommerceService.Repository.Service
             _connectionString = _configuration.GetConnectionString("EcommerceDb");
         }
 
+        public int GetOrderIdByOrderNumber(string orderNumber)
+        {
+            try
+            {
+                connection();
+                using (SqlCommand cmd = new SqlCommand("SELECT OrderId FROM Orders WHERE OrderNumber = @OrderNumber", con))
+                {
+                    cmd.Parameters.AddWithValue("@OrderNumber", orderNumber ?? (object)DBNull.Value);
+                    var result = cmd.ExecuteScalar();
+                    return result != null ? Convert.ToInt32(result) : 0;
+                }
+            }
+            finally
+            {
+                if (con.State == ConnectionState.Open) con.Close();
+            }
+        }
+
         private void connection()
         {
             string constr = this._configuration.GetConnectionString("EcommerceDb");
             con = new SqlConnection(constr);
             if (con.State == ConnectionState.Closed)
-            {
                 con.Open();
-            }
         }
+
+        // ─────────────────────────────────────────────────────────────
+        // EXISTING METHODS (unchanged)
+        // ─────────────────────────────────────────────────────────────
 
         public List<Category> GetCategories()
         {
@@ -36,29 +56,21 @@ namespace EcommerceService.Repository.Service
                 connection();
                 using (SqlCommand cmd = new SqlCommand("sp_GetCategories", con))
                 {
+                    cmd.CommandType = CommandType.StoredProcedure;
                     SqlDataReader reader = cmd.ExecuteReader();
-                    // Ensure you have the following NuGet package installed in your project:
-                    // System.Data.SqlClient
-
-                    // This using directive is required for SqlConnection
-
-                    // If you already have this using directive, make sure the NuGet package is referenced.
-                    // In Visual Studio, right-click your project > Manage NuGet Packages > Browse > Search for "System.Data.SqlClient" and install it.
                     while (reader.Read())
                     {
                         categories.Add(new Category
                         {
                             category_id = Convert.ToInt32(reader["category_id"]),
-                            Name = reader["Name"].ToString(),
-                            //Description = reader["Description"].ToString()
+                            Name = reader["Name"].ToString()
                         });
                     }
                 }
             }
             finally
             {
-                if (con.State == ConnectionState.Open)
-                    con.Close();
+                if (con.State == ConnectionState.Open) con.Close();
             }
             return categories;
         }
@@ -69,7 +81,7 @@ namespace EcommerceService.Repository.Service
             try
             {
                 connection();
-                using (SqlCommand cmd = new SqlCommand("SELECT * FROM products", con))
+                using (SqlCommand cmd = new SqlCommand("SELECT * FROM products WHERE IsActive = 1", con))
                 {
                     SqlDataReader reader = cmd.ExecuteReader();
                     while (reader.Read())
@@ -89,43 +101,10 @@ namespace EcommerceService.Repository.Service
             }
             finally
             {
-                if (con.State == ConnectionState.Open)
-                    con.Close();
+                if (con.State == ConnectionState.Open) con.Close();
             }
             return products;
         }
-
-        //public List<Product> GetProductsVariants()
-        //{
-        //    List<Product> products = new List<Product>();
-        //    try
-        //    {
-        //        connection();
-        //        using (SqlCommand cmd = new SqlCommand("SELECT * FROM products", con))
-        //        {
-        //            SqlDataReader reader = cmd.ExecuteReader();
-        //            while (reader.Read())
-        //            {
-        //                products.Add(new Product
-        //                {
-        //                    product_id = Convert.ToInt32(reader["product_id"]),
-        //                    name = reader["name"].ToString(),
-        //                    price = Convert.ToDecimal(reader["price"]),
-        //                    description = reader["description"].ToString(),
-        //                    main_image = reader["main_image"].ToString(),
-        //                    created_at = Convert.ToDateTime(reader["created_at"]),
-        //                    IsActive = Convert.ToBoolean(reader["IsActive"])
-        //                });
-        //            }
-        //        }
-        //    }
-        //    finally
-        //    {
-        //        if (con.State == ConnectionState.Open)
-        //            con.Close();
-        //    }
-        //    return products;
-        ////}
 
         public List<ProductVariant> GetProductsVariants(int id, List<ProductVariant>? productVariants)
         {
@@ -133,36 +112,25 @@ namespace EcommerceService.Repository.Service
             try
             {
                 connection();
-                string query = @"SELECT 
-                    p.product_id,
-                    p.name,
-                    p.price,
-                    p.description,
-                    p.main_image,
-                    p.created_at,
-                    p.IsActive,
-                    pv.variant_id,
-                    pv.color_name,
-                    pv.color_hex,
-                    pv.stock,
-                    pv.size,
-                    pv.heel_height,
-                    pv.IsActive as variant_IsActive
-                FROM [Ecommerce].[dbo].[products] p
-                LEFT JOIN [Ecommerce].[dbo].[product_variants] pv 
-                    ON p.product_id = pv.product_id
-                WHERE p.product_id = @id
-                    AND p.IsActive = 1
-                    AND (pv.IsActive = 1 OR pv.IsActive IS NULL)";
+                string query = @"
+                    SELECT 
+                        p.product_id, p.name, p.price, p.description,
+                        p.main_image, p.created_at, p.IsActive,
+                        pv.variant_id, pv.color_name, pv.color_hex,
+                        pv.stock, pv.size, pv.heel_height,
+                        pv.IsActive AS variant_IsActive
+                    FROM [dbo].[products] p
+                    LEFT JOIN [dbo].[product_variants] pv ON p.product_id = pv.product_id
+                    WHERE p.product_id = @id
+                      AND p.IsActive = 1
+                      AND (pv.IsActive = 1 OR pv.IsActive IS NULL)";
 
                 using (SqlCommand cmd = new SqlCommand(query, con))
                 {
                     cmd.Parameters.AddWithValue("@id", id);
                     SqlDataReader reader = cmd.ExecuteReader();
-
                     while (reader.Read())
                     {
-                        // Create product object only once
                         if (foundProduct == null)
                         {
                             foundProduct = new Product
@@ -177,8 +145,6 @@ namespace EcommerceService.Repository.Service
                                 variants = new List<ProductVariant>()
                             };
                         }
-
-                        // Add variant if exists
                         if (!reader.IsDBNull(reader.GetOrdinal("variant_id")))
                         {
                             foundProduct.variants.Add(new ProductVariant
@@ -198,11 +164,11 @@ namespace EcommerceService.Repository.Service
             }
             finally
             {
-                if (con.State == ConnectionState.Open)
-                    con.Close();
+                if (con.State == ConnectionState.Open) con.Close();
             }
             return foundProduct?.variants ?? new List<ProductVariant>();
         }
+
         public bool PlaceOrder(OrderRequest order)
         {
             try
@@ -214,14 +180,18 @@ namespace EcommerceService.Repository.Service
                     {
                         try
                         {
-                            // 1️⃣ Insert Order
+                            // Insert Order
                             string insertOrderQuery = @"
-                            INSERT INTO Orders (OrderNumber, CustomerName, Email, Phone, Address, City, Pincode, TotalAmount)
-                            OUTPUT INSERTED.OrderId
-                            VALUES (@OrderNumber, @CustomerName, @Email, @Phone, @Address, @City, @Pincode, @TotalAmount)";
+                                INSERT INTO Orders 
+                                    (OrderNumber, CustomerName, Email, Phone, Address, City,
+                                     Pincode, TotalAmount, PaymentMode, PaymentStatus, OrderStatus, CreatedDate)
+                                OUTPUT INSERTED.OrderId
+                                VALUES 
+                                    (@OrderNumber, @CustomerName, @Email, @Phone, @Address, @City,
+                                     @Pincode, @TotalAmount, @PaymentMode, @PaymentStatus, 'Pending', GETDATE())";
 
                             SqlCommand orderCmd = new SqlCommand(insertOrderQuery, conn, transaction);
-                            orderCmd.Parameters.AddWithValue("@OrderNumber", "ORD-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                            orderCmd.Parameters.AddWithValue("@OrderNumber", order.OrderNumber ?? "ORD-" + Guid.NewGuid().ToString("N").Substring(0, 8));
                             orderCmd.Parameters.AddWithValue("@CustomerName", order.Name ?? (object)DBNull.Value);
                             orderCmd.Parameters.AddWithValue("@Email", order.Email ?? (object)DBNull.Value);
                             orderCmd.Parameters.AddWithValue("@Phone", order.Phone ?? (object)DBNull.Value);
@@ -229,15 +199,22 @@ namespace EcommerceService.Repository.Service
                             orderCmd.Parameters.AddWithValue("@City", order.City ?? (object)DBNull.Value);
                             orderCmd.Parameters.AddWithValue("@Pincode", order.Pincode ?? (object)DBNull.Value);
                             orderCmd.Parameters.AddWithValue("@TotalAmount", order.Total);
+                            orderCmd.Parameters.AddWithValue("@PaymentMode", order.PaymentMode ?? "COD");
+                            orderCmd.Parameters.AddWithValue("@PaymentStatus", order.PaymentMode == "razorpay" ? "Pending" : "COD");
 
                             int orderId = Convert.ToInt32(orderCmd.ExecuteScalar());
 
-                            // 2️⃣ Insert Order Items
+                            // Store orderId back so caller can use it
+                            order.DbOrderId = orderId;
+
+                            // Insert Order Items
                             foreach (var item in order.Items)
                             {
                                 string insertItemQuery = @"
-                                INSERT INTO OrderItems (OrderId, ProductId, ProductName, Color, Size, HeelHeight, Quantity, Price)
-                                VALUES (@OrderId, @ProductId, @ProductName, @Color, @Size, @HeelHeight, @Quantity, @Price)";
+                                    INSERT INTO OrderItems 
+                                        (OrderId, ProductId, ProductName, Color, Size, HeelHeight, Quantity, Price)
+                                    VALUES 
+                                        (@OrderId, @ProductId, @ProductName, @Color, @Size, @HeelHeight, @Quantity, @Price)";
 
                                 SqlCommand itemCmd = new SqlCommand(insertItemQuery, conn, transaction);
                                 itemCmd.Parameters.AddWithValue("@OrderId", orderId);
@@ -251,7 +228,6 @@ namespace EcommerceService.Repository.Service
                                 itemCmd.ExecuteNonQuery();
                             }
 
-                            // 3️⃣ Commit
                             transaction.Commit();
                             return true;
                         }
@@ -271,5 +247,141 @@ namespace EcommerceService.Repository.Service
         }
 
 
+
+        public int InsertPaymentTransaction(int orderId, string orderNumber, string razorpayOrderId, decimal amount, string ipAddress, string userAgent)
+        {
+            try
+            {
+                connection();
+                using (SqlCommand cmd = new SqlCommand("sp_InsertPaymentTransaction", con))
+                {
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@OrderId", orderId);
+                    cmd.Parameters.AddWithValue("@OrderNumber", orderNumber);
+                    cmd.Parameters.AddWithValue("@RazorpayOrderId", razorpayOrderId);
+                    cmd.Parameters.AddWithValue("@Amount", amount);
+                    cmd.Parameters.AddWithValue("@PaymentMode", "Razorpay");
+                    cmd.Parameters.AddWithValue("@IPAddress", ipAddress ?? (object)DBNull.Value);
+                    cmd.Parameters.AddWithValue("@UserAgent", userAgent ?? (object)DBNull.Value);
+                    var result = cmd.ExecuteScalar();
+                    return result != null ? Convert.ToInt32(result) : 0;
+                }
+            }
+            finally
+            {
+                if (con.State == ConnectionState.Open) con.Close();
+            }
+        }
+
+        public bool UpdatePaymentSuccess(string razorpayOrderId, string razorpayPaymentId, string razorpaySignature, string paymentMethod, string rawResponse)
+        {
+            try
+            {
+                connection();
+                using (SqlCommand cmd = new SqlCommand("sp_UpdatePaymentSuccess", con))
+                {
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@RazorpayOrderId", razorpayOrderId);
+                    cmd.Parameters.AddWithValue("@RazorpayPaymentId", razorpayPaymentId);
+                    cmd.Parameters.AddWithValue("@RazorpaySignature", razorpaySignature);
+                    cmd.Parameters.AddWithValue("@PaymentMethod", paymentMethod ?? (object)DBNull.Value);
+                    cmd.Parameters.AddWithValue("@RawResponse", rawResponse ?? (object)DBNull.Value);
+                    cmd.ExecuteNonQuery();
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("UpdatePaymentSuccess error: " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                if (con.State == ConnectionState.Open) con.Close();
+            }
+        }
+
+        public bool UpdatePaymentFailed(string razorpayOrderId, string razorpayPaymentId, string failureReason, string failureCode, string rawResponse)
+        {
+            try
+            {
+                connection();
+                using (SqlCommand cmd = new SqlCommand("sp_UpdatePaymentFailed", con))
+                {
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@RazorpayOrderId", razorpayOrderId);
+                    cmd.Parameters.AddWithValue("@RazorpayPaymentId", razorpayPaymentId ?? (object)DBNull.Value);
+                    cmd.Parameters.AddWithValue("@FailureReason", failureReason ?? (object)DBNull.Value);
+                    cmd.Parameters.AddWithValue("@FailureCode", failureCode ?? (object)DBNull.Value);
+                    cmd.Parameters.AddWithValue("@RawResponse", rawResponse ?? (object)DBNull.Value);
+                    cmd.ExecuteNonQuery();
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("UpdatePaymentFailed error: " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                if (con.State == ConnectionState.Open) con.Close();
+            }
+        }
+
+        public bool InsertWebhookLog(string eventId, string eventType, string razorpayOrderId, string razorpayPaymentId, string razorpayRefundId, decimal amount, string rawPayload)
+        {
+            try
+            {
+                connection();
+                using (SqlCommand cmd = new SqlCommand("sp_InsertWebhookLog", con))
+                {
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@EventId", eventId);
+                    cmd.Parameters.AddWithValue("@EventType", eventType);
+                    cmd.Parameters.AddWithValue("@RazorpayOrderId", razorpayOrderId ?? (object)DBNull.Value);
+                    cmd.Parameters.AddWithValue("@RazorpayPaymentId", razorpayPaymentId ?? (object)DBNull.Value);
+                    cmd.Parameters.AddWithValue("@RazorpayRefundId", razorpayRefundId ?? (object)DBNull.Value);
+                    cmd.Parameters.AddWithValue("@Amount", amount);
+                    cmd.Parameters.AddWithValue("@RawPayload", rawPayload ?? (object)DBNull.Value);
+                    cmd.ExecuteNonQuery();
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("InsertWebhookLog error: " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                if (con.State == ConnectionState.Open) con.Close();
+            }
+        }
+
+        public bool UpdateWebhookProcessed(string eventId, string errorMessage)
+        {
+            try
+            {
+                connection();
+                using (SqlCommand cmd = new SqlCommand("sp_UpdateWebhookProcessed", con))
+                {
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@EventId", eventId);
+                    cmd.Parameters.AddWithValue("@ErrorMessage", errorMessage ?? (object)DBNull.Value);
+                    cmd.ExecuteNonQuery();
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("UpdateWebhookProcessed error: " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                if (con.State == ConnectionState.Open) con.Close();
+            }
+        }
     }
 }
