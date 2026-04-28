@@ -2,7 +2,7 @@
 using EcommerceService.Models;
 using EcommerceService.Repository.Interface;
 using System.Data;
-using System.Data.SqlClient;
+using Microsoft.Data.SqlClient;
 
 namespace EcommerceService.Repository.Service
 {
@@ -75,6 +75,7 @@ namespace EcommerceService.Repository.Service
             return categories;
         }
 
+        [Obsolete]
         public List<Product> GetProducts()
         {
             List<Product> products = new List<Product>();
@@ -169,6 +170,7 @@ namespace EcommerceService.Repository.Service
             return foundProduct?.variants ?? new List<ProductVariant>();
         }
 
+        [Obsolete]
         public bool PlaceOrder(OrderRequest order)
         {
             try
@@ -259,8 +261,7 @@ namespace EcommerceService.Repository.Service
             }
         }
 
-
-
+        [Obsolete]
         public int InsertPaymentTransaction(int orderId, string orderNumber, string razorpayOrderId, decimal amount, string ipAddress, string userAgent)
         {
             try
