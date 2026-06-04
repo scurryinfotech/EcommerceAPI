@@ -1,14 +1,19 @@
 
+using EcommerceAPI.Repositories;
 using EcommerceService.Repository.Interface;
 using EcommerceService.Repository.Service;
-using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+builder.Services.AddScoped<IContactRepository, ContactRepository>();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Ye camelCase automatically handle kar lega
+        options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+    });
 builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
 builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();

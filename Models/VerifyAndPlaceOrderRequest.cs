@@ -1,10 +1,17 @@
-﻿namespace EcommerceAPI.Models
+﻿using EcommerceAPI.Models;
+using System.Text.Json.Serialization;
+
+public class VerifyAndPlaceOrderRequest
 {
-    public class VerifyAndPlaceOrderRequest
-    {
-        public string RazorpayOrderId { get; set; }
-        public string RazorpayPaymentId { get; set; }
-        public string RazorpaySignature { get; set; }
-        public OrderRequest Order { get; set; }
-    }
+    [JsonPropertyName("razorpayOrderId")]
+    public string RazorpayOrderId { get; set; }
+
+    [JsonPropertyName("razorpayPaymentId")]
+    public string RazorpayPaymentId { get; set; }
+
+    [JsonPropertyName("razorpaySignature")]
+    public string RazorpaySignature { get; set; }
+
+    [JsonPropertyName("order")]          
+    public OrderRequest Order { get; set; }
 }

@@ -38,16 +38,15 @@ namespace EcommerceService.Controllers
 
                 Dictionary<string, object> options = new Dictionary<string, object>
         {
-            { "amount",          (int)(req.Amount * 100) }, // paise
+            { "amount",          (int)(req.Amount * 100) }, 
             { "currency",        "INR" },
-            { "receipt",         req.OrderNumber },         // temp receipt ref
+            { "receipt",         req.OrderNumber },        
             { "payment_capture", 1 }
         };
 
                 Order rzpOrder = client.Order.Create(options);
                 string razorpayOrderId = rzpOrder["id"].ToString();
 
-                // ✅ No DB insert here — just return razorpay order details to JS
                 return Ok(new
                 {
                     razorpayOrderId,
@@ -70,7 +69,6 @@ namespace EcommerceService.Controllers
             {
                 string keySecret = _config["Razorpay:KeySecret"];
 
-                // Step 1: Verify HMAC signature
                 string payload = req.RazorpayOrderId + "|" + req.RazorpayPaymentId;
                 using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(keySecret));
                 var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
@@ -79,7 +77,6 @@ namespace EcommerceService.Controllers
                 if (calcSig != req.RazorpaySignature)
                     return BadRequest(new { success = false, message = "Payment verification failed." });
 
-                // Step 2: Signature verified — now save order to DB
                 req.Order.PaymentMode = "razorpay";
                 req.Order.PaymentStatus = "Paid";
 
@@ -88,7 +85,6 @@ namespace EcommerceService.Controllers
                 if (!result || req.Order.DbOrderId == 0)
                     return StatusCode(500, new { success = false, message = "Payment verified but order could not be saved. Contact support." });
 
-                // Step 3: Log payment transaction against real OrderId
                 string ip = HttpContext.Connection.RemoteIpAddress?.ToString();
                 string userAgent = Request.Headers["User-Agent"].ToString();
 
@@ -100,7 +96,7 @@ namespace EcommerceService.Controllers
                     ip,
                     userAgent);
 
-                // Step 4: Mark payment as success in DB
+                  // Step 4: Mark payment as success in DB
                 string paymentMethod = null;
                 try
                 {
