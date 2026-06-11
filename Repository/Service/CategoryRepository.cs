@@ -1,8 +1,8 @@
 ﻿using EcommerceAPI.Models;
 using EcommerceService.Models;
 using EcommerceService.Repository.Interface;
-using System.Data;
 using Microsoft.Data.SqlClient;
+using System.Data;
 
 namespace EcommerceService.Repository.Service
 {
@@ -151,12 +151,12 @@ namespace EcommerceService.Repository.Service
                             {
                                 variant_id = Convert.ToInt32(reader["variant_id"]),
                                 product_id = Convert.ToInt32(reader["product_id"]),
-                                color_name = reader["color_name"].ToString(),
-                                color_hex = reader["color_hex"].ToString(),
-                                size = Convert.ToInt32(reader["size"]),
+                                color_name = reader["color_name"]?.ToString() ?? "",
+                                color_hex = reader["color_hex"]?.ToString() ?? "",
+                                size = reader["size"]?.ToString() ?? "",
                                 stock = Convert.ToInt32(reader["stock"]),
                                 IsActive = Convert.ToBoolean(reader["variant_IsActive"]),
-                                heel_height = Convert.ToInt32(reader["heel_height"])
+                                heel_height = reader["heel_height"]?.ToString() ?? ""
                             });
                         }
                     }
@@ -395,6 +395,71 @@ namespace EcommerceService.Repository.Service
             {
                 if (con.State == ConnectionState.Open) con.Close();
             }
+        }
+
+
+        //paypall
+
+        public bool InsertPaypalTransaction(
+    int orderId,
+    string orderNumber,
+    string paypalOrderId,
+    decimal amount)
+        {
+            connection();
+
+            using SqlCommand cmd =
+                new SqlCommand("sp_InsertPaypalTransaction", con);
+
+            cmd.CommandType = CommandType.StoredProcedure;
+
+            cmd.Parameters.AddWithValue("@OrderId", orderId);
+            cmd.Parameters.AddWithValue("@OrderNumber", orderNumber);
+            cmd.Parameters.AddWithValue("@PaypalOrderId", paypalOrderId);
+            cmd.Parameters.AddWithValue("@Amount", amount);
+
+            cmd.ExecuteNonQuery();
+
+            return true;
+        }
+        public bool UpdatePaypalSuccess(
+    string paypalOrderId,
+    string captureId,
+    string rawResponse)
+        {
+            connection();
+
+            using SqlCommand cmd =
+                new SqlCommand("sp_UpdatePaypalSuccess", con);
+
+            cmd.CommandType = CommandType.StoredProcedure;
+
+            cmd.Parameters.AddWithValue("@PaypalOrderId", paypalOrderId);
+            cmd.Parameters.AddWithValue("@PaypalCaptureId", captureId);
+            cmd.Parameters.AddWithValue("@RawResponse", rawResponse);
+
+            cmd.ExecuteNonQuery();
+
+            return true;
+        }
+
+        public bool UpdatePaypalFailed(
+    string paypalOrderId,
+    string reason)
+        {
+            connection();
+
+            using SqlCommand cmd =
+                new SqlCommand("sp_UpdatePaypalFailed", con);
+
+            cmd.CommandType = CommandType.StoredProcedure;
+
+            cmd.Parameters.AddWithValue("@PaypalOrderId", paypalOrderId);
+            cmd.Parameters.AddWithValue("@Reason", reason);
+
+            cmd.ExecuteNonQuery();
+
+            return true;
         }
     }
 }
