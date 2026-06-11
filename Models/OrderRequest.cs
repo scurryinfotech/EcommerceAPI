@@ -26,6 +26,9 @@ namespace EcommerceAPI.Models
         public string RazorpayOrderId { get; set; }
         public string RazorpayPaymentId { get; set; }
         public string RazorpaySignature { get; set; }
+        public string PaypalOrderId { get; set; }
+
+        public string PaypalCaptureId { get; set; }
     }
 
     public class OrderItem
