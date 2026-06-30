@@ -24,7 +24,7 @@ builder.Services.AddScoped<IHomeRepository, HomeRepository>();
 builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
 
 // ADD THIS LINE
-//builder.Services.AddScoped<CategoryRepository>();
+builder.Services.AddScoped<CategoryRepository>();
 
 builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
 
