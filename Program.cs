@@ -1,4 +1,5 @@
 using EcommerceAPI.Repositories;
+using EcommerceAPI.Repository.Interface;
 using EcommerceService.Repository.Interface;
 using EcommerceService.Repository.Service;
 
@@ -16,12 +17,14 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddScoped<IContactRepository, ContactRepository>();
-
-// Existing registration
+builder.Services.AddScoped<IWebsiteSettingsRepository, WebsiteSettingsRepository>();
+builder.Services.AddScoped<IBannerRepository, BannerRepository>();
+builder.Services.AddScoped<IBrandRepository, BrandRepository>();
+builder.Services.AddScoped<IHomeRepository, HomeRepository>();
 builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
 
 // ADD THIS LINE
-builder.Services.AddScoped<CategoryRepository>();
+//builder.Services.AddScoped<CategoryRepository>();
 
 builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
 
@@ -39,6 +42,8 @@ var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
+    app.UseDeveloperExceptionPage();
+
     app.UseSwagger();
     app.UseSwaggerUI();
 }

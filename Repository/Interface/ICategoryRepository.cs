@@ -18,5 +18,16 @@ namespace EcommerceService.Repository.Interface
         bool UpdatePaymentFailed(string razorpayOrderId, string razorpayPaymentId, string failureReason, string failureCode, string rawResponse);
         bool InsertWebhookLog(string eventId, string eventType, string razorpayOrderId, string razorpayPaymentId, string razorpayRefundId, decimal amount, string rawPayload);
         bool UpdateWebhookProcessed(string eventId, string errorMessage);
+        List<ProductImage> GetProductImages(int productId);
+
+        int AddProductImage(int productId, string imagePath, int displayOrder, bool isMain);
+        bool ProductHasMainImage(int productId);
+
+        List<Category> GetActiveCategoriesOrdered();
+        OrderStatusResponse GetOrderStatus(string orderNumber, string email);
+        List<ProductCard> SearchProducts(string keyword, int top = 50);
+        ProductDetailPage GetProductDetailPage(int productId);
+
+
     }
 }
