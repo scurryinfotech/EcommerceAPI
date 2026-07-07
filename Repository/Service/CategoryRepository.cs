@@ -78,12 +78,26 @@ namespace EcommerceService.Repository.Service
         public List<Product> GetProducts()
         {
             List<Product> products = new List<Product>();
+
             try
             {
                 connection();
-                using (SqlCommand cmd = new SqlCommand("SELECT * FROM products WHERE IsActive = 1", con))
+
+                string query = @"
+SELECT
+    p.*,
+    pv.color_name,
+    pv.color_hex
+FROM products p
+LEFT JOIN product_variants pv
+    ON p.product_id = pv.product_id
+WHERE p.IsActive = 1
+ORDER BY p.product_id";
+
+                using (SqlCommand cmd = new SqlCommand(query, con))
                 {
                     SqlDataReader reader = cmd.ExecuteReader();
+
                     while (reader.Read())
                     {
                         products.Add(new Product
@@ -94,15 +108,22 @@ namespace EcommerceService.Repository.Service
                             description = reader["description"].ToString(),
                             main_image = reader["main_image"].ToString(),
                             created_at = Convert.ToDateTime(reader["created_at"]),
-                            IsActive = Convert.ToBoolean(reader["IsActive"])
+                            IsActive = Convert.ToBoolean(reader["IsActive"]),
+
+                            color_name = reader["color_name"] != DBNull.Value ? reader["color_name"].ToString() : "",
+                            color_hex = reader["color_hex"] != DBNull.Value ? reader["color_hex"].ToString() : ""
                         });
                     }
+
+                    reader.Close();
                 }
             }
             finally
             {
-                if (con.State == ConnectionState.Open) con.Close();
+                if (con.State == ConnectionState.Open)
+                    con.Close();
             }
+
             return products;
         }
 

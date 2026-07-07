@@ -9,6 +9,8 @@
         public string main_image { get; set; }
         public DateTime created_at { get; set; }
         public bool IsActive { get; set; }
+        public string color_name { get; set; }
+        public string color_hex { get; set; }
         public List<ProductVariant> variants { get; set; } = new List<ProductVariant>();
 
 
