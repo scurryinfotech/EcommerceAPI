@@ -77,22 +77,37 @@ namespace EcommerceService.Repository.Service
 
         public List<Product> GetProducts()
         {
-            List<Product> products = new List<Product>();
+            Dictionary<int, Product> productDictionary = new Dictionary<int, Product>();
 
             try
             {
                 connection();
 
                 string query = @"
-SELECT
-    p.*,
-    pv.color_name,
-    pv.color_hex
-FROM products p
-LEFT JOIN product_variants pv
-    ON p.product_id = pv.product_id
-WHERE p.IsActive = 1
-ORDER BY p.product_id";
+            SELECT
+                p.product_id,
+                p.name,
+                p.price,
+                p.description,
+                p.main_image,
+                p.created_at,
+                p.IsActive,
+
+                pv.variant_id,
+                pv.color_name,
+                pv.color_hex,
+                pv.stock,
+                pv.size,
+                pv.IsActive AS VariantIsActive,
+                pv.heel_height
+
+            FROM products p
+            LEFT JOIN product_variants pv
+                ON p.product_id = pv.product_id
+
+            WHERE p.IsActive = 1
+
+            ORDER BY p.product_id;";
 
                 using (SqlCommand cmd = new SqlCommand(query, con))
                 {
@@ -100,19 +115,62 @@ ORDER BY p.product_id";
 
                     while (reader.Read())
                     {
-                        products.Add(new Product
-                        {
-                            product_id = Convert.ToInt32(reader["product_id"]),
-                            name = reader["name"].ToString(),
-                            price = Convert.ToDecimal(reader["price"]),
-                            description = reader["description"].ToString(),
-                            main_image = reader["main_image"].ToString(),
-                            created_at = Convert.ToDateTime(reader["created_at"]),
-                            IsActive = Convert.ToBoolean(reader["IsActive"]),
+                        int productId = Convert.ToInt32(reader["product_id"]);
 
-                            color_name = reader["color_name"] != DBNull.Value ? reader["color_name"].ToString() : "",
-                            color_hex = reader["color_hex"] != DBNull.Value ? reader["color_hex"].ToString() : ""
-                        });
+                        // Create product only once
+                        if (!productDictionary.ContainsKey(productId))
+                        {
+                            productDictionary[productId] = new Product
+                            {
+                                product_id = productId,
+                                name = reader["name"].ToString(),
+                                price = Convert.ToDecimal(reader["price"]),
+                                description = reader["description"] == DBNull.Value
+                                              ? "": reader["description"].ToString(),
+                                main_image = reader["main_image"] == DBNull.Value
+                                              ? ""
+                                              : reader["main_image"].ToString(),
+                                created_at = Convert.ToDateTime(reader["created_at"]),
+                                IsActive = Convert.ToBoolean(reader["IsActive"]),
+
+                                variants = new List<ProductVariant>()
+                            };
+                        }
+
+
+                        // Add variant if product has variants
+                        if (reader["variant_id"] != DBNull.Value)
+                        {
+                            productDictionary[productId].variants.Add(new ProductVariant
+                            {
+                                variant_id = Convert.ToInt32(reader["variant_id"]),
+                                product_id = productId,
+
+                                color_name = reader["color_name"] == DBNull.Value
+                                             ? ""
+                                             : reader["color_name"].ToString(),
+
+                                color_hex = reader["color_hex"] == DBNull.Value
+                                            ? ""
+                                            : reader["color_hex"].ToString(),
+
+                                stock = reader["stock"] == DBNull.Value
+                                        ? 0
+                                        : Convert.ToInt32(reader["stock"]),
+
+                                size = reader["size"] == DBNull.Value
+                                       ? ""
+                                       : reader["size"].ToString(),
+
+                                IsActive = reader["VariantIsActive"] == DBNull.Value
+                                           ? false
+                                           : Convert.ToBoolean(reader["VariantIsActive"]),
+
+                                heel_height = reader["heel_height"] == DBNull.Value
+                                              ? ""
+                                              : reader["heel_height"].ToString()
+                            });
+                        }
                     }
 
                     reader.Close();
@@ -124,7 +182,7 @@ ORDER BY p.product_id";
                     con.Close();
             }
 
-            return products;
+            return productDictionary.Values.ToList();
         }
 
         public List<ProductImage> GetProductImages(int productId)
