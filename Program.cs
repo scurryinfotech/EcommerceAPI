@@ -1,5 +1,6 @@
 using EcommerceAPI.Repositories;
 using EcommerceAPI.Repository.Interface;
+using EcommerceAPI.Repository.Service;
 using EcommerceService.Repository.Interface;
 using EcommerceService.Repository.Service;
 
@@ -20,6 +21,8 @@ builder.Services.AddScoped<IContactRepository, ContactRepository>();
 builder.Services.AddScoped<IWebsiteSettingsRepository, WebsiteSettingsRepository>();
 builder.Services.AddScoped<IBannerRepository, BannerRepository>();
 builder.Services.AddScoped<IBrandRepository, BrandRepository>();
+builder.Services.AddScoped<IAuthRepository, AuthRepository>();
+builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 builder.Services.AddScoped<IHomeRepository, HomeRepository>();
 builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
 
@@ -40,6 +43,8 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+EcommerceAPI.Repository.DatabaseInitializer.InitializeDatabase(builder.Configuration);
+
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
@@ -51,6 +56,8 @@ if (app.Environment.IsDevelopment())
 app.UseCors("AllowAll");
 
 app.UseHttpsRedirection();
+
+app.UseStaticFiles();
 
 app.UseAuthorization();
 

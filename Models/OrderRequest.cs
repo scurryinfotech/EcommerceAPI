@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 
 namespace EcommerceAPI.Models
 {
@@ -6,37 +6,41 @@ namespace EcommerceAPI.Models
     {
         public int DbOrderId { get; set; }
 
-        public string OrderNumber { get; set; }
+        public string? OrderNumber { get; set; }
+        public string? OrderId { get; set; }
+        public string? Name { get; set; }
+        public string? Email { get; set; }
+        public string? Phone { get; set; }
+        public string? Address { get; set; }
+        public string? City { get; set; }
+        public string? Pincode { get; set; }
 
-        public string OrderId { get; set; }
-        public string Name { get; set; }
-        public string Email { get; set; }
-        public string Phone { get; set; }
-        public string Address { get; set; }
-        public string City { get; set; }
-        public string Pincode { get; set; }
+        public List<OrderItem> Items { get; set; } = new();
 
         [JsonPropertyName("OrderItems")]
-        public List<OrderItem> Items { get; set; } 
+        public List<OrderItem>? OrderItemsAlias
+        {
+            get => Items;
+            set { if (value != null) Items = value; }
+        }
 
         public decimal Total { get; set; }
-        public string PaymentMode { get; set; }
-        public string Date { get; set; }
-        public string PaymentStatus { get;  set; }
-        public string RazorpayOrderId { get; set; }
-        public string RazorpayPaymentId { get; set; }
-        public string RazorpaySignature { get; set; }
-        public string PaypalOrderId { get; set; }
-
-        public string PaypalCaptureId { get; set; }
+        public string? PaymentMode { get; set; }
+        public string? Date { get; set; }
+        public string? PaymentStatus { get; set; }
+        public string? RazorpayOrderId { get; set; }
+        public string? RazorpayPaymentId { get; set; }
+        public string? RazorpaySignature { get; set; }
+        public string? PaypalOrderId { get; set; }
+        public string? PaypalCaptureId { get; set; }
     }
 
     public class OrderItem
     {
         public int Id { get; set; }            // product_id
-        public string Name { get; set; }
-        public string Color { get; set; }
-        public string Size { get; set; }
+        public string? Name { get; set; }
+        public string? Color { get; set; }
+        public string? Size { get; set; }
         public decimal HeelHeight { get; set; }
         public int Quantity { get; set; }
         public decimal Price { get; set; }
