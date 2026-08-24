@@ -339,8 +339,7 @@ namespace EcommerceService.Repository.Service
                             
                             bool isRazorpay = string.Equals(order.PaymentMode, "razorpay", StringComparison.OrdinalIgnoreCase);
 
-                            // CustomerId 2 exists in Customers table (Rohit / Guest)
-                            int? validUserId = 2;
+                            int? validUserId = (order.UserId.HasValue && order.UserId.Value > 0) ? order.UserId.Value : (int?)null;
 
                             string insertOrderQuery = @"
                                 INSERT INTO Orders 
@@ -357,13 +356,13 @@ namespace EcommerceService.Repository.Service
 
                             SqlCommand orderCmd = new SqlCommand(insertOrderQuery, conn, transaction);
                             orderCmd.Parameters.AddWithValue("@OrderNumber", orderNumber);
-                            orderCmd.Parameters.AddWithValue("@CustomerName", (object?)order.Name ?? "Vinod M Rathod");
-                            orderCmd.Parameters.AddWithValue("@Email", (object?)order.Email ?? "scurryinfotech@gmail.com");
-                            orderCmd.Parameters.AddWithValue("@Phone", (object?)order.Phone ?? "6392363256");
-                            orderCmd.Parameters.AddWithValue("@Address", (object?)order.Address ?? "Flat No. 1103, Mannat Tower, Chembur");
-                            orderCmd.Parameters.AddWithValue("@City", (object?)order.City ?? "Greater Mumbai");
-                            orderCmd.Parameters.AddWithValue("@Pincode", (object?)order.Pincode ?? "400088");
-                            orderCmd.Parameters.AddWithValue("@TotalAmount", order.Total > 0 ? order.Total : 100);
+                            orderCmd.Parameters.AddWithValue("@CustomerName", (object?)order.Name ?? DBNull.Value);
+                            orderCmd.Parameters.AddWithValue("@Email", (object?)order.Email ?? DBNull.Value);
+                            orderCmd.Parameters.AddWithValue("@Phone", (object?)order.Phone ?? DBNull.Value);
+                            orderCmd.Parameters.AddWithValue("@Address", (object?)order.Address ?? DBNull.Value);
+                            orderCmd.Parameters.AddWithValue("@City", (object?)order.City ?? DBNull.Value);
+                            orderCmd.Parameters.AddWithValue("@Pincode", (object?)order.Pincode ?? DBNull.Value);
+                            orderCmd.Parameters.AddWithValue("@TotalAmount", order.Total);
                             orderCmd.Parameters.AddWithValue("@UserId", (object?)validUserId ?? DBNull.Value);
                             orderCmd.Parameters.AddWithValue("@PaymentMode", order.PaymentMode ?? "razorpay");
                             orderCmd.Parameters.AddWithValue("@PaymentStatus", isRazorpay ? "Paid" : "Pending");

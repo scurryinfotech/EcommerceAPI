@@ -29,12 +29,18 @@ namespace EcommerceAPI.Repository
                         Role VARCHAR(20) NOT NULL DEFAULT 'Customer', -- Customer, Admin, SuperAdmin
                         IsActive BIT NOT NULL DEFAULT 1,
                         IsApproved BIT NOT NULL DEFAULT 1,
+                        IsMobileVerified BIT NOT NULL DEFAULT 0,
                         PasswordHash NVARCHAR(256) NULL,
                         PasswordSalt NVARCHAR(256) NULL,
                         CreatedAt DATETIME NOT NULL DEFAULT GETDATE(),
                         UpdatedAt DATETIME NOT NULL DEFAULT GETDATE()
                     );
                     CREATE INDEX IX_Users_Mobile ON Users(MobileNumber);
+                END;
+
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Users') AND name = 'IsMobileVerified')
+                BEGIN
+                    ALTER TABLE Users ADD IsMobileVerified BIT NOT NULL DEFAULT 0;
                 END;
 
                 -- 2. UserProfiles Table

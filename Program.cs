@@ -1,6 +1,7 @@
 using EcommerceAPI.Repositories;
 using EcommerceAPI.Repository.Interface;
 using EcommerceAPI.Repository.Service;
+using EcommerceAPI.Services;
 using EcommerceService.Repository.Interface;
 using EcommerceService.Repository.Service;
 
@@ -13,6 +14,9 @@ builder.Services.AddControllers()
     });
 
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient<IMuzztechService, MuzztechService>();
+builder.Services.AddHttpClient<IOtpService, MuzztechOtpService>();
+builder.Services.AddScoped<IOtpService, MuzztechOtpService>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

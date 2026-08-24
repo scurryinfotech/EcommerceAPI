@@ -6,10 +6,16 @@ namespace EcommerceAPI.Repository.Interface
     {
         (bool Success, string Message, string? OtpForDebug) SendOtp(string mobileNumber, string purpose);
         (bool Success, string Message, UserDto? User) VerifyOtp(string mobileNumber, string otp, string purpose);
+        AuthResult VerifyOtpV2(VerifyOtpRequest request);
         (bool Success, string Message, UserDto? User) RegisterUser(RegisterRequest request);
+        AuthResult RegisterCustomer(RegisterRequest request);
+        AuthResult LoginCustomer(LoginRequest request);
+        AuthResult ForgotPassword(ForgotPasswordRequest request);
+        AuthResult ResetPassword(ResetPasswordRequest request);
         UserDto? GetUserById(int userId);
         UserDto? GetUserByMobile(string mobileNumber);
         UserDto GetOrCreateGuestUser();
+        bool MarkMobileVerified(string mobileNumber);
         bool UpdateUserProfile(UpdateProfileRequest request);
         List<UserAddressDto> GetUserAddresses(int userId);
         UserAddressDto? GetAddressById(int addressId, int userId);

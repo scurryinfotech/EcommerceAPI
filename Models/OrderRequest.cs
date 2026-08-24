@@ -5,6 +5,7 @@ namespace EcommerceAPI.Models
     public class OrderRequest
     {
         public int DbOrderId { get; set; }
+        public int? UserId { get; set; }
 
         public string? OrderNumber { get; set; }
         public string? OrderId { get; set; }
