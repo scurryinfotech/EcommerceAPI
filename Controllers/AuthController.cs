@@ -19,7 +19,7 @@ namespace EcommerceAPI.Controllers
         }
 
         [HttpPost("register")]
-        public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+        public IActionResult Register([FromBody] RegisterRequest request)
         {
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
@@ -27,13 +27,6 @@ namespace EcommerceAPI.Controllers
             var result = _authRepo.RegisterCustomer(request);
             if (!result.Success)
                 return BadRequest(result);
-
-            // Trigger OTP via Muzztech 2FA API
-            var otpRes = await _otpService.SendOtpAsync(request.MobileNumber);
-            if (otpRes.Success)
-            {
-                result.SessionId = otpRes.SessionId;
-            }
 
             return Ok(result);
         }
@@ -70,8 +63,8 @@ namespace EcommerceAPI.Controllers
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            // Verify OTP via Muzztech 2FA API
-            var verifyRes = await _otpService.VerifyOtpAsync(request.SessionId, request.Otp);
+            // Verify OTP via Muzztech 2FA API (uses stored session from DB automatically if SessionId is omitted)
+            var verifyRes = await _otpService.VerifyOtpAsync(request.MobileNumber, request.Otp, request.SessionId);
             if (!verifyRes.Success)
             {
                 return BadRequest(new AuthResult { Success = false, Message = verifyRes.Message, IsMobileVerified = false });
@@ -125,7 +118,7 @@ namespace EcommerceAPI.Controllers
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var verifyRes = await _otpService.VerifyOtpAsync(request.SessionId, request.Otp);
+            var verifyRes = await _otpService.VerifyOtpAsync(request.MobileNumber, request.Otp, request.SessionId);
             if (!verifyRes.Success)
             {
                 return BadRequest(new { success = false, message = verifyRes.Message });
@@ -141,7 +134,7 @@ namespace EcommerceAPI.Controllers
         [HttpPost("recover-account")]
         public async Task<IActionResult> RecoverAccount([FromBody] VerifyOtpRequest request)
         {
-            var verifyRes = await _otpService.VerifyOtpAsync(request.SessionId, request.Otp);
+            var verifyRes = await _otpService.VerifyOtpAsync(request.MobileNumber, request.Otp, request.SessionId);
             if (!verifyRes.Success)
                 return BadRequest(new { success = false, message = verifyRes.Message });
 

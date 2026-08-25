@@ -6,14 +6,14 @@ namespace EcommerceAPI.Services
     {
         /// <summary>
         /// Triggers an OTP send via Muzztech for the given mobile number.
-        /// Returns the Muzztech sessionId that must be sent back on verify.
+        /// Stores the Muzztech sessionId in DB and returns the send result.
         /// </summary>
         Task<OtpSendResult> SendOtpAsync(string mobileNumber);
 
         /// <summary>
-        /// Verifies the OTP entered by the customer against the given
-        /// Muzztech sessionId.
+        /// Verifies the OTP entered by the customer.
+        /// Automatically retrieves the active Muzztech sessionId from DB using mobileNumber if sessionId is null or empty.
         /// </summary>
-        Task<OtpVerifyResult> VerifyOtpAsync(string sessionId, string otp);
+        Task<OtpVerifyResult> VerifyOtpAsync(string mobileNumber, string otp, string? sessionId = null);
     }
 }

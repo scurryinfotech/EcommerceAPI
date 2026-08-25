@@ -13,8 +13,8 @@ namespace EcommerceAPI.Models
         [EmailAddress]
         public string? Email { get; set; }
 
-        [Required, StringLength(100, MinimumLength = 6, ErrorMessage = "Password must be at least 6 characters.")]
-        public string Password { get; set; } = string.Empty;
+        [StringLength(100, MinimumLength = 6, ErrorMessage = "Password must be at least 6 characters.")]
+        public string? Password { get; set; }
 
         public string CompanyName { get; set; } = string.Empty;
         public string? GSTIN { get; set; }

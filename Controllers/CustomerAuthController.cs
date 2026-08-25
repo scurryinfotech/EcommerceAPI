@@ -78,7 +78,7 @@ namespace EcommerceAPI.Controllers
         [HttpPost("verify-otp")]
         public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtpRequest req)
         {
-            var verifyResult = await _otpService.VerifyOtpAsync(req.SessionId, req.Otp);
+            var verifyResult = await _otpService.VerifyOtpAsync(req.MobileNumber, req.Otp, req.SessionId);
             if (!verifyResult.Success)
                 return BadRequest(new { success = false, message = verifyResult.Message });
 

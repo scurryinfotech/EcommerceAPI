@@ -2,7 +2,20 @@ using System.Text.Json.Serialization;
 
 namespace EcommerceAPI.Models
 {
-    public class MuzztechOtpResponse
+    public class OtpEntry
+    {
+        public string PhoneNumber { get; set; } = string.Empty;
+        public string MobileNumber { get; set; } = string.Empty;
+    }
+
+    public class OtpVerify
+    {
+        public string SessionId { get; set; } = string.Empty;
+        public string Otp { get; set; } = string.Empty;
+        public string MobileNumber { get; set; } = string.Empty;
+    }
+
+    public class MuzztechSendResponse
     {
         [JsonPropertyName("Status")]
         public string? Status { get; set; }
@@ -19,6 +32,8 @@ namespace EcommerceAPI.Models
         [JsonPropertyName("message")]
         public string? Message { get; set; }
     }
+
+    public class MuzztechOtpResponse : MuzztechSendResponse { }
 
     public class OtpSendResult
     {

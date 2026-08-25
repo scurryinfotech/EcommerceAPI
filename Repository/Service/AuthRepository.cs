@@ -265,7 +265,7 @@ namespace EcommerceAPI.Repository.Service
 
                 string insertUser = @"INSERT INTO Users (MobileNumber, Email, FullName, CompanyName, GSTIN, PasswordHash, Role, IsActive, IsApproved, IsMobileVerified, CreatedAt, UpdatedAt)
                                       OUTPUT INSERTED.UserId
-                                      VALUES (@MobileNumber, @Email, @FullName, @CompanyName, @GSTIN, @PasswordHash, 'Customer', 1, 1, 0, GETDATE(), GETDATE())";
+                                      VALUES (@MobileNumber, @Email, @FullName, @CompanyName, @GSTIN, @PasswordHash, 'Customer', 1, 1, 1, GETDATE(), GETDATE())";
 
                 int newUserId = 0;
                 using (var cmd = new SqlCommand(insertUser, con, transaction))
@@ -305,9 +305,9 @@ namespace EcommerceAPI.Repository.Service
                         cmdAddr.Parameters.AddWithValue("@Mobile", mobile);
                         cmdAddr.Parameters.AddWithValue("@AddressLine1", request.AddressLine1);
                         cmdAddr.Parameters.AddWithValue("@AddressLine2", (object?)request.AddressLine2 ?? DBNull.Value);
-                        cmdAddr.Parameters.AddWithValue("@City", request.City);
-                        cmdAddr.Parameters.AddWithValue("@State", request.State);
-                        cmdAddr.Parameters.AddWithValue("@Pincode", request.Pincode);
+                        cmdAddr.Parameters.AddWithValue("@City", (object?)request.City ?? "");
+                        cmdAddr.Parameters.AddWithValue("@State", (object?)request.State ?? "");
+                        cmdAddr.Parameters.AddWithValue("@Pincode", (object?)request.Pincode ?? "");
                         cmdAddr.Parameters.AddWithValue("@Country", string.IsNullOrEmpty(request.Country) ? "India" : request.Country);
                         cmdAddr.ExecuteNonQuery();
                     }
@@ -315,25 +315,20 @@ namespace EcommerceAPI.Repository.Service
 
                 transaction.Commit();
 
-                // Send Muzztech verification OTP
-                var otpRes = SendOtp(mobile, "SignupVerification");
-
                 var userDto = GetUserById(newUserId);
                 return new AuthResult
                 {
                     Success = true,
-                    Message = "Account created successfully. Please verify your mobile number with the OTP sent via Muzztech to +91 " + mobile,
-                    SessionId = Guid.NewGuid().ToString(),
-                    IsMobileVerified = false,
+                    Message = "Account created successfully.",
+                    IsMobileVerified = true,
                     User = userDto,
-                    OtpForDebug = otpRes.OtpForDebug,
                     Customer = new CustomerProfile
                     {
                         CustomerId = newUserId,
                         FullName = request.FullName,
                         MobileNumber = mobile,
                         Email = request.Email,
-                        IsMobileVerified = false,
+                        IsMobileVerified = true,
                         CreatedDate = DateTime.Now
                     }
                 };
