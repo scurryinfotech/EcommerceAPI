@@ -57,6 +57,15 @@ namespace EcommerceAPI.Repository.Service
             return Convert.ToBase64String(bytes);
         }
 
+        private bool IsValidPassword(string? password)
+        {
+            if (string.IsNullOrWhiteSpace(password) || password.Length < 8) return false;
+            bool hasUpper = password.Any(char.IsUpper);
+            bool hasLower = password.Any(char.IsLower);
+            bool hasDigit = password.Any(char.IsDigit);
+            return hasUpper && hasLower && hasDigit;
+        }
+
         private bool VerifyPassword(string password, string storedHash)
         {
             if (string.IsNullOrEmpty(storedHash)) return true;
@@ -246,6 +255,11 @@ namespace EcommerceAPI.Repository.Service
         {
             if (string.IsNullOrWhiteSpace(request.MobileNumber) || string.IsNullOrWhiteSpace(request.FullName))
                 return new AuthResult { Success = false, Message = "Full Name and Mobile Number are required." };
+
+            if (!string.IsNullOrEmpty(request.Password) && !IsValidPassword(request.Password))
+            {
+                return new AuthResult { Success = false, Message = "Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, and one number." };
+            }
 
             string mobile = request.MobileNumber.Trim().Replace(" ", "").Replace("-", "").Replace("+", "");
             if (mobile.Length > 10) mobile = mobile.Substring(mobile.Length - 10);
