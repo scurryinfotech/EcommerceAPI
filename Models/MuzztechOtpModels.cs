@@ -41,6 +41,7 @@ namespace EcommerceAPI.Models
         public string? SessionId { get; set; }
         public string Message { get; set; } = string.Empty;
         public string? DebugOtp { get; set; }
+        public string? OtpCode { get; set; }
     }
 
     public class OtpVerifyResult

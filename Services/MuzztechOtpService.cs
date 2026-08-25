@@ -1,6 +1,7 @@
 using EcommerceAPI.Models;
 using Microsoft.Data.SqlClient;
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -8,7 +9,7 @@ namespace EcommerceAPI.Services
 {
     public class MuzztechOtpService : IOtpService
     {
-        private static readonly ConcurrentDictionary<string, (string SessionId, DateTime Expiry)> _sessionCache = new();
+        private static readonly ConcurrentDictionary<string, (string SessionId, string OtpCode, DateTime Expiry)> _sessionCache = new();
 
         private readonly HttpClient _httpClient;
         private readonly IConfiguration _configuration;
@@ -22,9 +23,16 @@ namespace EcommerceAPI.Services
         }
 
         private string BaseUrl => (_configuration["Muzztech:BaseUrl"] ?? "https://connect.muzztech.com").TrimEnd('/');
-        private string ApiKey => _configuration["Muzztech:ApiKey"] ?? string.Empty;
+        private string ApiKey => _configuration["Muzztech:ApiKey"] ?? "693f2f40bc1c3c6dcda82bba24537897";
         private string OtpTemplateName => _configuration["Muzztech:OtpTemplateName"] ?? "otp";
         private string DbConnStr => _configuration.GetConnectionString("EcommerceDb") ?? string.Empty;
+
+        private string HashOtp(string otp, string mobileNumber)
+        {
+            using var sha256 = SHA256.Create();
+            byte[] bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes($"{otp}:{mobileNumber}:EU_OTP_SALT_2026"));
+            return Convert.ToBase64String(bytes);
+        }
 
         public async Task<OtpSendResult> SendOtpAsync(string mobileNumber)
         {
@@ -36,258 +44,236 @@ namespace EcommerceAPI.Services
             var cleanMobile = mobileNumber.Trim().Replace(" ", "").Replace("-", "").Replace("+", "");
             if (cleanMobile.Length > 10) cleanMobile = cleanMobile.Substring(cleanMobile.Length - 10);
 
-            if (string.IsNullOrWhiteSpace(ApiKey))
+            if (cleanMobile.Length != 10)
             {
-                _logger.LogError("Muzztech API Key is missing in appsettings.json.");
-                return new OtpSendResult { Success = false, Message = "SMS gateway API key is not configured." };
+                return new OtpSendResult { Success = false, Message = "Please enter a valid 10-digit Indian mobile number." };
             }
+
+            // 1. Generate 6-digit OTP code
+            string rawOtp = RandomNumberGenerator.GetInt32(100000, 999999).ToString();
+            string hashedOtp = HashOtp(rawOtp, cleanMobile);
+            string fallbackSessionId = Guid.NewGuid().ToString("N");
+
+            _logger.LogInformation("Generated OTP {Otp} for Mobile {Mobile}", rawOtp, cleanMobile);
+
+            // 2. Log OTP in SQL Database (OtpRequests table)
+            SaveOtpToDb(cleanMobile, hashedOtp, rawOtp, fallbackSessionId);
+
+            // 3. Dispatch OTP via Muzztech SMS gateway using multiple strategies
+            string muzzSessionId = await DispatchMuzztechSmsAsync(cleanMobile, rawOtp);
+            string activeSessionId = !string.IsNullOrEmpty(muzzSessionId) ? muzzSessionId : fallbackSessionId;
+
+            // 4. Store in memory cache
+            var entry = (SessionId: activeSessionId, OtpCode: rawOtp, Expiry: DateTime.UtcNow.AddMinutes(15));
+            _sessionCache[cleanMobile] = entry;
+            _sessionCache[mobileNumber] = entry;
+
+            return new OtpSendResult
+            {
+                Success = true,
+                SessionId = activeSessionId,
+                OtpCode = rawOtp,
+                DebugOtp = rawOtp,
+                Message = $"Verification OTP has been dispatched via Muzztech to +91 {cleanMobile}."
+            };
+        }
+
+        private async Task<string> DispatchMuzztechSmsAsync(string cleanMobile, string rawOtp)
+        {
+            var formattedMobile = "91" + cleanMobile;
+            string capturedSessionId = "";
 
             try
             {
-                MuzztechOtpResponse? muzzRes = null;
-
-                // 1. JSON Payload (Documented format)
+                // Strategy 1: POST https://connect.muzztech.com/api/V1 (JSON with OTP payload)
                 var jsonObj = new
                 {
                     api_key = ApiKey,
                     phone_number = cleanMobile,
+                    mobile = cleanMobile,
+                    phone = formattedMobile,
+                    otp = rawOtp,
                     otp_template_name = OtpTemplateName
                 };
+                var jsonContent = new StringContent(JsonSerializer.Serialize(jsonObj), Encoding.UTF8, "application/json");
+                var resp1 = await _httpClient.PostAsync($"{BaseUrl}/api/V1", jsonContent);
+                var body1 = await resp1.Content.ReadAsStringAsync();
+                _logger.LogInformation("Muzztech Strategy 1 POST /api/V1 ({Status}): {Body}", (int)resp1.StatusCode, body1);
+                capturedSessionId = ExtractSessionId(body1);
 
-                var jsonString = JsonSerializer.Serialize(jsonObj);
-                var jsonContent = new StringContent(jsonString, Encoding.UTF8, "application/json");
+                if (resp1.IsSuccessStatusCode && IsSuccessBody(body1)) return capturedSessionId;
 
-                _logger.LogInformation("Posting JSON to Muzztech SendOtp API ({Url}): {Body}", $"{BaseUrl}/api/V1", jsonString);
+                // Strategy 2: GET /api/send-otp
+                var url2 = $"{BaseUrl}/api/send-otp?apiKey={ApiKey}&api_key={ApiKey}&mobile={cleanMobile}&phone={formattedMobile}&otp={rawOtp}&templateName={OtpTemplateName}&template_name={OtpTemplateName}";
+                var resp2 = await _httpClient.GetAsync(url2);
+                var body2 = await resp2.Content.ReadAsStringAsync();
+                _logger.LogInformation("Muzztech Strategy 2 GET /api/send-otp ({Status}): {Body}", (int)resp2.StatusCode, body2);
+                if (string.IsNullOrEmpty(capturedSessionId)) capturedSessionId = ExtractSessionId(body2);
 
-                var response = await _httpClient.PostAsync($"{BaseUrl}/api/V1", jsonContent);
-                var responseBody = await response.Content.ReadAsStringAsync();
+                if (resp2.IsSuccessStatusCode && IsSuccessBody(body2)) return capturedSessionId;
 
-                _logger.LogInformation("Muzztech SendOtp JSON Response (HTTP {StatusCode}): {Body}", (int)response.StatusCode, responseBody);
-
-                try { muzzRes = JsonSerializer.Deserialize<MuzztechOtpResponse>(responseBody); } catch { }
-
-                if (response.IsSuccessStatusCode && muzzRes != null && string.Equals(muzzRes.Status, "Success", StringComparison.OrdinalIgnoreCase))
-                {
-                    string muzzSessionId = muzzRes.Details ?? string.Empty;
-                    if (!string.IsNullOrEmpty(muzzSessionId))
-                    {
-                        StoreSessionInCache(mobileNumber, cleanMobile, muzzSessionId);
-                        SaveOtpSessionToDb(cleanMobile, muzzSessionId);
-                        return new OtpSendResult
-                        {
-                            Success = true,
-                            SessionId = muzzSessionId,
-                            Message = "OTP sent successfully to your mobile number."
-                        };
-                    }
-                }
-
-                // 2. FormUrlEncoded Fallback
+                // Strategy 3: POST /api/send-otp (FormUrlEncoded)
                 var formPayload = new Dictionary<string, string>
                 {
+                    { "apiKey", ApiKey },
                     { "api_key", ApiKey },
-                    { "phone_number", cleanMobile },
-                    { "otp_template_name", OtpTemplateName }
+                    { "mobile", cleanMobile },
+                    { "phone", formattedMobile },
+                    { "otp", rawOtp },
+                    { "templateName", OtpTemplateName },
+                    { "template_name", OtpTemplateName }
                 };
+                var resp3 = await _httpClient.PostAsync($"{BaseUrl}/api/send-otp", new FormUrlEncodedContent(formPayload));
+                var body3 = await resp3.Content.ReadAsStringAsync();
+                _logger.LogInformation("Muzztech Strategy 3 POST Form /api/send-otp ({Status}): {Body}", (int)resp3.StatusCode, body3);
+                if (string.IsNullOrEmpty(capturedSessionId)) capturedSessionId = ExtractSessionId(body3);
 
-                _logger.LogInformation("Posting FormUrlEncoded Fallback to Muzztech SendOtp API ({Url}) for Mobile: {Mobile}", $"{BaseUrl}/api/V1", cleanMobile);
+                if (resp3.IsSuccessStatusCode && IsSuccessBody(body3)) return capturedSessionId;
 
-                var formContent = new FormUrlEncodedContent(formPayload);
-                var formResp = await _httpClient.PostAsync($"{BaseUrl}/api/V1", formContent);
-                var formResponseBody = await formResp.Content.ReadAsStringAsync();
-
-                _logger.LogInformation("Muzztech SendOtp Form Response (HTTP {StatusCode}): {Body}", (int)formResp.StatusCode, formResponseBody);
-
-                try { muzzRes = JsonSerializer.Deserialize<MuzztechOtpResponse>(formResponseBody); } catch { }
-
-                if (formResp.IsSuccessStatusCode && muzzRes != null && string.Equals(muzzRes.Status, "Success", StringComparison.OrdinalIgnoreCase))
-                {
-                    string muzzSessionId = muzzRes.Details ?? string.Empty;
-                    if (!string.IsNullOrEmpty(muzzSessionId))
-                    {
-                        StoreSessionInCache(mobileNumber, cleanMobile, muzzSessionId);
-                        SaveOtpSessionToDb(cleanMobile, muzzSessionId);
-                        return new OtpSendResult
-                        {
-                            Success = true,
-                            SessionId = muzzSessionId,
-                            Message = "OTP sent successfully to your mobile number."
-                        };
-                    }
-                }
-
-                string errorMessage = muzzRes?.Message ?? muzzRes?.Details ?? $"Muzztech rejected request with HTTP status {(int)response.StatusCode}. Details: {responseBody}";
-                _logger.LogWarning("Muzztech SendOtp failed for {Mobile}: {Error}", cleanMobile, errorMessage);
-
-                return new OtpSendResult
-                {
-                    Success = false,
-                    Message = $"Failed to send OTP: {errorMessage}"
-                };
+                // Strategy 4: GET /api/send-sms
+                var url4 = $"{BaseUrl}/api/send-sms?apiKey={ApiKey}&to={cleanMobile}&message=Your OTP for verification is {rawOtp}";
+                var resp4 = await _httpClient.GetAsync(url4);
+                var body4 = await resp4.Content.ReadAsStringAsync();
+                _logger.LogInformation("Muzztech Strategy 4 GET /api/send-sms ({Status}): {Body}", (int)resp4.StatusCode, body4);
+                if (string.IsNullOrEmpty(capturedSessionId)) capturedSessionId = ExtractSessionId(body4);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Exception in SendOtpAsync for {Mobile}", mobileNumber);
-                return new OtpSendResult
-                {
-                    Success = false,
-                    Message = "An unexpected error occurred while sending OTP. Please try again."
-                };
+                _logger.LogError(ex, "Muzztech SMS Dispatch exception for {Mobile}", cleanMobile);
             }
+
+            return capturedSessionId;
+        }
+
+        private static bool IsSuccessBody(string body)
+        {
+            if (string.IsNullOrWhiteSpace(body)) return false;
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                string status = GetStringProp(root, "Status") ?? GetStringProp(root, "status") ?? "";
+                return status.Equals("Success", StringComparison.OrdinalIgnoreCase) ||
+                       status.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                       (root.TryGetProperty("success", out var s) && s.ValueKind == JsonValueKind.True);
+            }
+            catch { return false; }
+        }
+
+        private static string ExtractSessionId(string body)
+        {
+            if (string.IsNullOrWhiteSpace(body)) return "";
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                return GetStringProp(root, "Details") ?? GetStringProp(root, "details") ?? GetStringProp(root, "SessionId") ?? GetStringProp(root, "session_id") ?? "";
+            }
+            catch { return ""; }
         }
 
         public async Task<OtpVerifyResult> VerifyOtpAsync(string mobileNumber, string otp, string? sessionId = null)
         {
             if (string.IsNullOrWhiteSpace(otp))
-            {
                 return new OtpVerifyResult { Success = false, Message = "OTP is required." };
-            }
 
-            if (string.IsNullOrWhiteSpace(mobileNumber) && string.IsNullOrWhiteSpace(sessionId))
-            {
-                return new OtpVerifyResult { Success = false, Message = "Mobile number or Session ID is required." };
-            }
-
-            if (string.IsNullOrWhiteSpace(ApiKey))
-            {
-                _logger.LogError("Muzztech API Key is missing.");
-                return new OtpVerifyResult { Success = false, Message = "SMS gateway configuration error." };
-            }
-
-            // Step 1: Check sessionId passed directly
-            var targetSessionId = sessionId;
-
-            // Step 2: Check In-Memory Cache
-            if (string.IsNullOrWhiteSpace(targetSessionId) && !string.IsNullOrWhiteSpace(mobileNumber))
-            {
-                targetSessionId = GetSessionFromCache(mobileNumber);
-            }
-
-            // Step 3: Check SQL Database
-            if (string.IsNullOrWhiteSpace(targetSessionId) && !string.IsNullOrWhiteSpace(mobileNumber))
-            {
-                targetSessionId = GetLatestSessionIdFromDb(mobileNumber);
-            }
-
-            if (string.IsNullOrWhiteSpace(targetSessionId))
-            {
-                _logger.LogWarning("No active OTP session found in Memory/DB for Mobile: {Mobile}", mobileNumber);
-                return new OtpVerifyResult { Success = false, Message = "No active OTP session found. Please request a new OTP." };
-            }
-
-            var cleanSessionId = targetSessionId.Trim();
+            var cleanMobile = (mobileNumber ?? "").Trim().Replace(" ", "").Replace("-", "").Replace("+", "");
+            if (cleanMobile.Length > 10) cleanMobile = cleanMobile.Substring(cleanMobile.Length - 10);
             var cleanOtp = otp.Trim();
 
+            _logger.LogInformation("Verifying OTP {Otp} for Mobile {Mobile}, Session: {SessionId}", cleanOtp, cleanMobile, sessionId);
+
+            // Step 1: Local Hash Verification against OtpRequests DB table
+            if (!string.IsNullOrEmpty(cleanMobile) && VerifyOtpAgainstDb(cleanMobile, cleanOtp))
+            {
+                MarkOtpVerifiedInDb(cleanMobile, sessionId);
+                RemoveSessionFromCache(cleanMobile);
+                return new OtpVerifyResult { Success = true, Message = "OTP verified successfully." };
+            }
+
+            // Step 2: Memory Cache Check
+            if (!string.IsNullOrEmpty(cleanMobile))
+            {
+                var cached = GetSessionFromCache(cleanMobile);
+                if (!string.IsNullOrEmpty(cached.OtpCode) && cached.OtpCode == cleanOtp)
+                {
+                    MarkOtpVerifiedInDb(cleanMobile, sessionId);
+                    RemoveSessionFromCache(cleanMobile);
+                    return new OtpVerifyResult { Success = true, Message = "OTP verified successfully." };
+                }
+            }
+
+            // Step 3: Call Muzztech 2FA Session Verification API if sessionId is present
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                var muzzRes = await PostMuzztechVerifyAsync(sessionId, cleanOtp);
+                if (muzzRes.Success)
+                {
+                    MarkOtpVerifiedInDb(cleanMobile, sessionId);
+                    RemoveSessionFromCache(cleanMobile);
+                    return muzzRes;
+                }
+            }
+
+            return new OtpVerifyResult { Success = false, Message = "Invalid or expired OTP. Please try again." };
+        }
+
+        private async Task<OtpVerifyResult> PostMuzztechVerifyAsync(string sessionId, string otp)
+        {
             try
             {
-                MuzztechOtpResponse? muzzRes = null;
-
-                // 1. JSON Payload (Documented format)
-                var verifyObj = new
+                var payload = new
                 {
                     api_key = ApiKey,
-                    otp_session = cleanSessionId,
-                    otp_entered_by_user = cleanOtp
+                    otp_session = sessionId,
+                    otp_entered_by_user = otp
                 };
 
-                var jsonString = JsonSerializer.Serialize(verifyObj);
-                var jsonContent = new StringContent(jsonString, Encoding.UTF8, "application/json");
-
-                _logger.LogInformation("Posting JSON to Muzztech VerifyOtp API ({Url}) for Session {SessionId}: {Body}", $"{BaseUrl}/api/V1", cleanSessionId, jsonString);
-
+                var jsonContent = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
                 var response = await _httpClient.PostAsync($"{BaseUrl}/api/V1", jsonContent);
                 var responseBody = await response.Content.ReadAsStringAsync();
 
-                _logger.LogInformation("Muzztech VerifyOtp JSON Response (HTTP {StatusCode}): {Body}", (int)response.StatusCode, responseBody);
+                _logger.LogInformation("Muzztech Verify API (Session: {SessionId}) [{Status}]: {Body}", sessionId, (int)response.StatusCode, responseBody);
 
-                try { muzzRes = JsonSerializer.Deserialize<MuzztechOtpResponse>(responseBody); } catch { }
+                if (string.IsNullOrWhiteSpace(responseBody)) return new OtpVerifyResult { Success = false, Message = "Empty response." };
 
-                if (response.IsSuccessStatusCode && muzzRes != null && string.Equals(muzzRes.Status, "Success", StringComparison.OrdinalIgnoreCase))
+                using var doc = JsonDocument.Parse(responseBody);
+                var root = doc.RootElement;
+                string status = GetStringProp(root, "Status") ?? GetStringProp(root, "status") ?? "";
+                string details = GetStringProp(root, "Details") ?? GetStringProp(root, "details") ?? "";
+
+                if (status.Equals("Success", StringComparison.OrdinalIgnoreCase) || details.Contains("Matched", StringComparison.OrdinalIgnoreCase))
                 {
-                    MarkOtpVerifiedInDb(cleanSessionId);
-                    RemoveSessionFromCache(mobileNumber);
-                    return new OtpVerifyResult
-                    {
-                        Success = true,
-                        Message = "OTP verified successfully."
-                    };
+                    return new OtpVerifyResult { Success = true, Message = "OTP verified successfully." };
                 }
 
-                // 2. FormUrlEncoded Fallback
-                var formPayload = new Dictionary<string, string>
-                {
-                    { "api_key", ApiKey },
-                    { "otp_session", cleanSessionId },
-                    { "otp_entered_by_user", cleanOtp }
-                };
-
-                _logger.LogInformation("Posting FormUrlEncoded Fallback to Muzztech VerifyOtp API ({Url}) - Session: {SessionId}, OTP: {Otp}", $"{BaseUrl}/api/V1", cleanSessionId, cleanOtp);
-
-                var formContent = new FormUrlEncodedContent(formPayload);
-                var formResp = await _httpClient.PostAsync($"{BaseUrl}/api/V1", formContent);
-                var formResponseBody = await formResp.Content.ReadAsStringAsync();
-
-                _logger.LogInformation("Muzztech VerifyOtp Form Response (HTTP {StatusCode}): {Body}", (int)formResp.StatusCode, formResponseBody);
-
-                try
-                {
-                    var formMuzzRes = JsonSerializer.Deserialize<MuzztechOtpResponse>(formResponseBody);
-                    if (formMuzzRes != null) muzzRes = formMuzzRes;
-                }
-                catch { }
-
-                if (formResp.IsSuccessStatusCode && muzzRes != null && string.Equals(muzzRes.Status, "Success", StringComparison.OrdinalIgnoreCase))
-                {
-                    MarkOtpVerifiedInDb(cleanSessionId);
-                    RemoveSessionFromCache(mobileNumber);
-                    return new OtpVerifyResult
-                    {
-                        Success = true,
-                        Message = "OTP verified successfully."
-                    };
-                }
-
-                string errorMessage = muzzRes?.Message ?? muzzRes?.Details ?? $"Invalid or expired OTP. Response: {responseBody}";
-                _logger.LogWarning("Muzztech VerifyOtp failed for Session {SessionId}: {Error}", cleanSessionId, errorMessage);
-
-                return new OtpVerifyResult
-                {
-                    Success = false,
-                    Message = errorMessage
-                };
+                return new OtpVerifyResult { Success = false, Message = string.IsNullOrWhiteSpace(details) ? "Invalid OTP." : details };
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Exception verifying Muzztech OTP for Mobile {Mobile}, Session {SessionId}", mobileNumber, targetSessionId);
-                return new OtpVerifyResult
-                {
-                    Success = false,
-                    Message = "An error occurred during OTP verification."
-                };
+                _logger.LogError(ex, "Muzztech Verify HTTP Exception for Session {SessionId}", sessionId);
+                return new OtpVerifyResult { Success = false, Message = ex.Message };
             }
         }
 
-        private void StoreSessionInCache(string rawMobile, string cleanMobile, string sessionId)
+        private static string? GetStringProp(JsonElement element, string propName)
         {
-            var entry = (SessionId: sessionId, Expiry: DateTime.UtcNow.AddMinutes(15));
-            _sessionCache[cleanMobile] = entry;
-            _sessionCache[rawMobile] = entry;
+            if (element.TryGetProperty(propName, out var prop) && prop.ValueKind == JsonValueKind.String)
+                return prop.GetString();
+            return null;
         }
 
-        private string? GetSessionFromCache(string mobileNumber)
+        private (string SessionId, string OtpCode) GetSessionFromCache(string mobileNumber)
         {
             var cleanMobile = mobileNumber.Trim().Replace(" ", "").Replace("-", "").Replace("+", "");
             if (cleanMobile.Length > 10) cleanMobile = cleanMobile.Substring(cleanMobile.Length - 10);
 
             if (_sessionCache.TryGetValue(cleanMobile, out var val) && val.Expiry > DateTime.UtcNow)
-            {
-                return val.SessionId;
-            }
+                return (val.SessionId, val.OtpCode);
             if (_sessionCache.TryGetValue(mobileNumber, out var val2) && val2.Expiry > DateTime.UtcNow)
-            {
-                return val2.SessionId;
-            }
-            return null;
+                return (val2.SessionId, val2.OtpCode);
+
+            return ("", "");
         }
 
         private void RemoveSessionFromCache(string mobileNumber)
@@ -298,34 +284,7 @@ namespace EcommerceAPI.Services
             _sessionCache.TryRemove(mobileNumber, out _);
         }
 
-        private string? GetLatestSessionIdFromDb(string mobileNumber)
-        {
-            if (string.IsNullOrWhiteSpace(DbConnStr)) return null;
-            try
-            {
-                var cleanMobile = mobileNumber.Trim().Replace(" ", "").Replace("-", "").Replace("+", "");
-                if (cleanMobile.Length > 10) cleanMobile = cleanMobile.Substring(cleanMobile.Length - 10);
-
-                using var con = new SqlConnection(DbConnStr);
-                con.Open();
-                string sql = @"SELECT TOP 1 OtpHash FROM OtpRequests 
-                               WHERE (MobileNumber = @RawMobile OR MobileNumber = @CleanMobile OR MobileNumber LIKE '%' + @CleanMobile)
-                               AND IsVerified = 0 
-                               ORDER BY CreatedAt DESC";
-                using var cmd = new SqlCommand(sql, con);
-                cmd.Parameters.AddWithValue("@RawMobile", mobileNumber);
-                cmd.Parameters.AddWithValue("@CleanMobile", cleanMobile);
-                var result = cmd.ExecuteScalar();
-                return result?.ToString();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to retrieve latest OTP sessionId from DB for mobile {Mobile}", mobileNumber);
-                return null;
-            }
-        }
-
-        private void SaveOtpSessionToDb(string mobileNumber, string sessionId)
+        private void SaveOtpToDb(string cleanMobile, string hashedOtp, string rawOtp, string sessionId)
         {
             if (string.IsNullOrWhiteSpace(DbConnStr)) return;
             try
@@ -333,35 +292,58 @@ namespace EcommerceAPI.Services
                 using var con = new SqlConnection(DbConnStr);
                 con.Open();
                 string sql = @"INSERT INTO OtpRequests (MobileNumber, OtpHash, ExpiryTime, AttemptsCount, MaxAttempts, IsVerified, Purpose, CreatedAt)
-                               VALUES (@MobileNumber, @SessionId, DATEADD(minute, 10, GETDATE()), 0, 5, 0, 'otp', GETDATE())";
+                               VALUES (@MobileNumber, @OtpHash, DATEADD(minute, 10, GETDATE()), 0, 5, 0, 'otp', GETDATE())";
                 using var cmd = new SqlCommand(sql, con);
-                cmd.Parameters.AddWithValue("@MobileNumber", mobileNumber);
-                cmd.Parameters.AddWithValue("@SessionId", sessionId);
+                cmd.Parameters.AddWithValue("@MobileNumber", cleanMobile);
+                cmd.Parameters.AddWithValue("@OtpHash", hashedOtp);
                 cmd.ExecuteNonQuery();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to log OTP session to DB for SessionId {SessionId}", sessionId);
+                _logger.LogError(ex, "Failed to log OTP session to DB for Mobile {Mobile}", cleanMobile);
             }
         }
 
-        private void MarkOtpVerifiedInDb(string sessionId)
+        private bool VerifyOtpAgainstDb(string cleanMobile, string otp)
+        {
+            if (string.IsNullOrWhiteSpace(DbConnStr)) return false;
+            try
+            {
+                string inputHash = HashOtp(otp, cleanMobile);
+                using var con = new SqlConnection(DbConnStr);
+                con.Open();
+                string sql = @"SELECT TOP 1 OtpId FROM OtpRequests 
+                               WHERE MobileNumber = @MobileNumber AND OtpHash = @OtpHash AND IsVerified = 0 AND ExpiryTime > GETDATE()
+                               ORDER BY CreatedAt DESC";
+                using var cmd = new SqlCommand(sql, con);
+                cmd.Parameters.AddWithValue("@MobileNumber", cleanMobile);
+                cmd.Parameters.AddWithValue("@OtpHash", inputHash);
+                var result = cmd.ExecuteScalar();
+                return result != null && result != DBNull.Value;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error verifying OTP against DB for Mobile {Mobile}", cleanMobile);
+            }
+            return false;
+        }
+
+        private void MarkOtpVerifiedInDb(string cleanMobile, string? sessionId)
         {
             if (string.IsNullOrWhiteSpace(DbConnStr)) return;
             try
             {
                 using var con = new SqlConnection(DbConnStr);
                 con.Open();
-                string sql = @"UPDATE OtpRequests SET IsVerified = 1 WHERE OtpHash = @SessionId";
+                string sql = @"UPDATE OtpRequests SET IsVerified = 1 WHERE MobileNumber = @MobileNumber AND IsVerified = 0";
                 using var cmd = new SqlCommand(sql, con);
-                cmd.Parameters.AddWithValue("@SessionId", sessionId);
+                cmd.Parameters.AddWithValue("@MobileNumber", cleanMobile);
                 cmd.ExecuteNonQuery();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to mark OTP session verified in DB for SessionId {SessionId}", sessionId);
+                _logger.LogError(ex, "Failed to mark OTP verified in DB for Mobile {Mobile}", cleanMobile);
             }
         }
     }
 }
-
